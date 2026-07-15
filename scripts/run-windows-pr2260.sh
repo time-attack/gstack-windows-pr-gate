@@ -58,6 +58,18 @@ install_dependencies() {
   ) 2>&1 | tee "$evidence/$label-install.log"
 }
 
+install_playwright_browser() {
+  local repo="$root/candidate/source"
+  local home="$root/candidate/home"
+  mkdir -p "$root/playwright-browsers"
+  (
+    export HOME="$home"
+    export PLAYWRIGHT_BROWSERS_PATH="$root/playwright-browsers"
+    cd "$repo"
+    bunx playwright install chromium
+  ) 2>&1 | tee "$evidence/playwright-install.log"
+}
+
 run_probe() {
   local label="$1"
   local repo="$root/$label/source"
@@ -71,6 +83,7 @@ run_probe() {
     export GSTACK_SKIP_COREUTILS=1
     export GSTACK_SKIP_FONTS=1
     export GSTACK_SKIP_GBRAIN_REGEN=1
+    export PLAYWRIGHT_BROWSERS_PATH="$root/playwright-browsers"
     export GSTACK_UNDER_TEST="$repo"
     export PR2260_FIXTURE_ROOT="$harness/probes"
     export PR2260_EVIDENCE_DIR="$evidence/$label-runtime"
@@ -93,6 +106,7 @@ fetch_checkout baseline "$BASE_SHA"
 fetch_checkout candidate "$CANDIDATE_SHA"
 install_dependencies baseline
 install_dependencies candidate
+install_playwright_browser
 
 baseline_rc=0
 run_probe baseline || baseline_rc=$?
