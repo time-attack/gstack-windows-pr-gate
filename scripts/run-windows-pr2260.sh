@@ -5,6 +5,7 @@ root_input="${1:?isolated root required}"
 harness_input="${2:?harness root required}"
 root="$(cygpath -u "$root_input")"
 harness="$(cygpath -u "$harness_input")"
+export PATH="$harness/tools:$PATH"
 
 case "$root" in
   /c/gstack-isolated/pr-2260/*) ;;
@@ -13,6 +14,8 @@ esac
 
 evidence="$root/evidence"
 mkdir -p "$evidence"
+command -v sha256sum >/dev/null
+command -v shasum >/dev/null
 
 git config --global user.email "windows-gate@gstack.test"
 git config --global user.name "GStack Windows Gate"
@@ -149,4 +152,3 @@ fs.writeFileSync(process.env.RESULT_PATH, JSON.stringify(result, null, 2) + '\n'
 NODE
 
 echo "FINAL_VERDICT=PASS" | tee -a "$evidence/verdict.log"
-

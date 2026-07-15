@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [ "${1:-}" != "-a" ] || [ "${2:-}" != "256" ]; then
+  echo "This gate only supports: shasum -a 256 <file>" >&2
+  exit 64
+fi
+shift 2
+exec sha256sum "$@"
+
