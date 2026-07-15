@@ -124,11 +124,29 @@ echo "BASELINE_REPRODUCED" | tee -a "$evidence/verdict.log"
 
 candidate_rc=0
 run_probe candidate || candidate_rc=$?
-if [ "$candidate_rc" -ne 0 ] || ! grep -q 'PRIMARY_PROBE_PASS' "$evidence/candidate-primary.log"; then
-  echo "CANDIDATE_PRIMARY_FAILED rc=$candidate_rc" | tee -a "$evidence/verdict.log"
+clean_stop_failed=0
+if [ "$candidate_rc" -ne 0 ]; then
+  if grep -q 'SHARP_SCREENSHOT_ASSERTION_OK' "$evidence/candidate-primary.log" \
+    && grep -q 'SOCKS_ROUTE_ASSERTION_OK' "$evidence/candidate-primary.log" \
+    && grep -q 'Server crashed twice in a row' "$evidence/candidate-primary.log"; then
+    clean_stop_failed=1
+    echo "CANDIDATE_CLEAN_STOP_FAILED rc=$candidate_rc" | tee -a "$evidence/verdict.log"
+    state_file="$root/candidate/source/.gstack/browse.json"
+    if [ -s "$state_file" ]; then
+      state_pid="$(node -e 'const fs=require("fs"); console.log(JSON.parse(fs.readFileSync(process.argv[1],"utf8")).pid)' "$state_file" 2>/dev/null || true)"
+      if [ -n "$state_pid" ]; then MSYS_NO_PATHCONV=1 taskkill.exe /PID "$state_pid" /T /F >/dev/null 2>&1 || true; fi
+      rm -f "$state_file"
+    fi
+  else
+    echo "CANDIDATE_PRIMARY_FAILED rc=$candidate_rc" | tee -a "$evidence/verdict.log"
+    exit 82
+  fi
+elif ! grep -q 'PRIMARY_PROBE_PASS' "$evidence/candidate-primary.log"; then
+  echo "CANDIDATE_PRIMARY_MISSING_PASS_MARKER" | tee -a "$evidence/verdict.log"
   exit 82
+else
+  echo "CANDIDATE_PRIMARY_PASSED" | tee -a "$evidence/verdict.log"
 fi
-echo "CANDIDATE_PRIMARY_PASSED" | tee -a "$evidence/verdict.log"
 
 set +e
 (
@@ -148,8 +166,9 @@ if [ "$secondary_rc" -ne 0 ]; then
 fi
 echo "CANDIDATE_SECONDARY_PASSED" | tee -a "$evidence/verdict.log"
 
-RESULT_PATH="$evidence/result.json" node - <<'NODE'
+RESULT_PATH="$evidence/result.json" CLEAN_STOP_FAILED="$clean_stop_failed" node - <<'NODE'
 const fs = require('fs');
+const cleanStopFailed = process.env.CLEAN_STOP_FAILED === '1';
 const result = {
   schemaVersion: 1,
   pr: 2260,
@@ -160,11 +179,16 @@ const result = {
   imageOS: process.env.ImageOS,
   imageVersion: process.env.ImageVersion,
   baseline: 'reproduced',
-  candidatePrimary: 'passed',
+  candidatePrimary: cleanStopFailed ? 'failed-at-clean-stop' : 'passed',
+  candidateCleanStop: cleanStopFailed ? 'failed' : 'passed',
   candidateSecondary: 'passed',
-  verdict: 'passed'
+  verdict: cleanStopFailed ? 'failed' : 'passed'
 };
 fs.writeFileSync(process.env.RESULT_PATH, JSON.stringify(result, null, 2) + '\n');
 NODE
 
+if [ "$clean_stop_failed" -eq 1 ]; then
+  echo "FINAL_VERDICT=FAIL_CLEAN_STOP" | tee -a "$evidence/verdict.log"
+  exit 84
+fi
 echo "FINAL_VERDICT=PASS" | tee -a "$evidence/verdict.log"
