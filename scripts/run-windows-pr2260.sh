@@ -75,7 +75,8 @@ run_probe() {
   local repo="$root/$label/source"
   local home="$root/$label/home"
   local output="$evidence/$label-primary.log"
-  mkdir -p "$evidence/$label-runtime"
+  local runtime_evidence="$repo/.pr2260-evidence"
+  mkdir -p "$runtime_evidence" "$evidence/$label-runtime"
 
   set +e
   (
@@ -86,11 +87,12 @@ run_probe() {
     export PLAYWRIGHT_BROWSERS_PATH="$root/playwright-browsers"
     export GSTACK_UNDER_TEST="$repo"
     export PR2260_FIXTURE_ROOT="$harness/probes"
-    export PR2260_EVIDENCE_DIR="$evidence/$label-runtime"
+    export PR2260_EVIDENCE_DIR="$runtime_evidence"
     bash "$harness/probes/windows-build-runtime.sh"
   ) 2>&1 | tee "$output"
   local rc="${PIPESTATUS[0]}"
   set -e
+  cp -R "$runtime_evidence"/. "$evidence/$label-runtime/" 2>/dev/null || true
   printf '%s primary_rc=%s\n' "$label" "$rc" | tee -a "$evidence/verdict.log"
   return "$rc"
 }
