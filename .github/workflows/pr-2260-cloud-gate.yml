@@ -1,0 +1,108 @@
+name: PR 2260 cloud gate
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-2260-cloud-gate
+  cancel-in-progress: false
+
+env:
+  BASE_SHA: a3259400a366593e0c909dd9ac3e59752efd2488
+  CANDIDATE_SHA: b9fbe4dea9b192d5d6fe6814bc558f89ef41dde7
+  BUN_VERSION: 1.3.14
+
+jobs:
+  windows:
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows 11 ARM64 plain path
+            runner: windows-11-arm
+            isolated_root: C:/gstack-isolated/pr-2260/plain
+            artifact: windows-11-arm-plain
+          - name: Windows 11 ARM64 path with spaces
+            runner: windows-11-arm
+            isolated_root: C:/gstack-isolated/pr-2260/path with spaces
+            artifact: windows-11-arm-spaces
+          - name: Windows Server 2025 x64 control
+            runner: windows-2025
+            isolated_root: C:/gstack-isolated/pr-2260/x64-control
+            artifact: windows-2025-x64-control
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 180
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout trusted harness
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
+
+      - name: Install fixed Bun version
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Record platform and select installed Chrome
+        run: |
+          set -euo pipefail
+          cmd.exe //d //c ver
+          uname -a
+          bun --version
+          node --version
+          git --version
+          bash --version | head -n 1
+          cygpath --version | head -n 1
+          df -h
+          chrome='/c/Program Files/Google/Chrome/Application/chrome.exe'
+          test -f "$chrome"
+          printf 'GSTACK_CHROMIUM_PATH=%s\n' "$(cygpath -w "$chrome")" >> "$GITHUB_ENV"
+
+      - name: Run immutable baseline/candidate gate
+        run: bash scripts/run-windows-pr2260.sh "${{ matrix.isolated_root }}" "$GITHUB_WORKSPACE"
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: pr-2260-${{ matrix.artifact }}
+          path: C:/gstack-isolated/pr-2260/**/evidence/**
+          if-no-files-found: warn
+          retention-days: 14
+
+  linux-control:
+    name: Ubuntu non-Windows regression control
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout trusted harness
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
+
+      - name: Install fixed Bun version
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Run immutable non-Windows control
+        run: bash scripts/run-linux-control-pr2260.sh /tmp/gstack-isolated/pr-2260/linux-control
+
+      - name: Upload control evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: pr-2260-linux-control
+          path: /tmp/gstack-isolated/pr-2260/linux-control/evidence/**
+          if-no-files-found: warn
+          retention-days: 14
