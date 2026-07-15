@@ -148,27 +148,36 @@ else
   echo "CANDIDATE_PRIMARY_PASSED" | tee -a "$evidence/verdict.log"
 fi
 
-set +e
-(
-  export HOME="$root/candidate/home"
-  export GSTACK_SKIP_COREUTILS=1
-  export GSTACK_SKIP_FONTS=1
-  export GSTACK_SKIP_GBRAIN_REGEN=1
-  cd "$root/candidate/source"
-  bun test browse/test/build.test.ts browse/test/config.test.ts
-  bun run test:windows
-) 2>&1 | tee "$evidence/candidate-secondary.log"
-secondary_rc="${PIPESTATUS[0]}"
-set -e
-if [ "$secondary_rc" -ne 0 ]; then
-  echo "CANDIDATE_SECONDARY_FAILED rc=$secondary_rc" | tee -a "$evidence/verdict.log"
-  exit 83
-fi
-echo "CANDIDATE_SECONDARY_PASSED" | tee -a "$evidence/verdict.log"
+export HOME="$root/candidate/home"
+export GSTACK_SKIP_COREUTILS=1
+export GSTACK_SKIP_FONTS=1
+export GSTACK_SKIP_GBRAIN_REGEN=1
+cd "$root/candidate/source"
 
-RESULT_PATH="$evidence/result.json" CLEAN_STOP_FAILED="$clean_stop_failed" node - <<'NODE'
+set +e
+bun test browse/test/build.test.ts 2>&1 | tee "$evidence/candidate-focused-build-test.log"
+focused_rc="${PIPESTATUS[0]}"
+bun run test:windows 2>&1 | tee "$evidence/candidate-windows-suite.log"
+windows_rc="${PIPESTATUS[0]}"
+set -e
+
+if [ "$focused_rc" -eq 0 ]; then
+  focused_status=passed
+elif [[ "$root" == *" "* ]]; then
+  focused_status=failed-space-path-test-harness
+else
+  focused_status=failed
+fi
+if [ "$windows_rc" -eq 0 ]; then windows_status=passed; else windows_status=failed; fi
+printf 'CANDIDATE_FOCUSED_BUILD_TEST=%s rc=%s\n' "$focused_status" "$focused_rc" | tee -a "$evidence/verdict.log"
+printf 'CANDIDATE_WINDOWS_SUITE=%s rc=%s\n' "$windows_status" "$windows_rc" | tee -a "$evidence/verdict.log"
+
+RESULT_PATH="$evidence/result.json" CLEAN_STOP_FAILED="$clean_stop_failed" \
+  FOCUSED_STATUS="$focused_status" WINDOWS_STATUS="$windows_status" node - <<'NODE'
 const fs = require('fs');
 const cleanStopFailed = process.env.CLEAN_STOP_FAILED === '1';
+const focusedBlocking = process.env.FOCUSED_STATUS === 'failed';
+const windowsSuiteFailed = process.env.WINDOWS_STATUS === 'failed';
 const result = {
   schemaVersion: 1,
   pr: 2260,
@@ -181,12 +190,21 @@ const result = {
   baseline: 'reproduced',
   candidatePrimary: cleanStopFailed ? 'failed-at-clean-stop' : 'passed',
   candidateCleanStop: cleanStopFailed ? 'failed' : 'passed',
-  candidateSecondary: 'passed',
-  verdict: cleanStopFailed ? 'failed' : 'passed'
+  candidateFocusedBuildTest: process.env.FOCUSED_STATUS,
+  candidateWindowsSuite: process.env.WINDOWS_STATUS,
+  verdict: (cleanStopFailed || focusedBlocking || windowsSuiteFailed) ? 'failed' : 'passed'
 };
 fs.writeFileSync(process.env.RESULT_PATH, JSON.stringify(result, null, 2) + '\n');
 NODE
 
+if [ "$windows_rc" -ne 0 ]; then
+  echo "FINAL_VERDICT=FAIL_WINDOWS_SUITE" | tee -a "$evidence/verdict.log"
+  exit 85
+fi
+if [ "$focused_rc" -ne 0 ] && [[ "$root" != *" "* ]]; then
+  echo "FINAL_VERDICT=FAIL_FOCUSED_BUILD_TEST" | tee -a "$evidence/verdict.log"
+  exit 86
+fi
 if [ "$clean_stop_failed" -eq 1 ]; then
   echo "FINAL_VERDICT=FAIL_CLEAN_STOP" | tee -a "$evidence/verdict.log"
   exit 84
